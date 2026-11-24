@@ -51,6 +51,18 @@ h1, h2, h3, h4 {{ font-family: 'Fraunces', serif !important; color: {INK}; lette
 .verdict.hold {{ background: #DDF0F1; border: 1px solid {TEAL}; color: #0E4F57; }}
 .verdict small {{ display:block; font-weight: 500; margin-top: 3px; }}
 .section-note {{ color: {MUTED}; font-size: .9rem; margin: -6px 0 10px 0; }}
+[class*="st-key-card"] {{ background: {CARD}; border: 1px solid {LINE} !important; border-radius: 18px !important;
+        padding: 6px 10px; box-shadow: 0 1px 3px rgba(23,35,59,.05); }}
+.banner {{ background: linear-gradient(100deg, #FFF3E8 0%, #FCE6DF 100%); border: 1px solid #F4C3B1;
+        border-left: 6px solid {CORAL}; border-radius: 14px; padding: 14px 20px; margin: 12px 0 14px 0; color: {INK}; }}
+.banner b {{ color: #8F2A0E; }}
+.banner .tag {{ font-size: .7rem; letter-spacing: .14em; text-transform: uppercase; color: {CORAL}; font-weight: 800; display: block; margin-bottom: 2px; }}
+.insight {{ font-size: .86rem; color: {MUTED}; padding: 0 6px 6px 6px; }}
+.insight b {{ color: {INK}; }}
+.chip {{ display: inline-block; padding: 2px 9px; border-radius: 99px; font-size: .72rem; font-weight: 700; }}
+.chip.bad {{ background: #FCE6DF; color: #8F2A0E; }} .chip.good {{ background: #DDF0F1; color: #0E4F57; }}
+.chip.flat {{ background: #EEE9DC; color: {MUTED}; }}
+.sec-title {{ font-family: 'Fraunces', serif; font-size: 1.25rem; font-weight: 700; margin: 4px 0 2px 0; }}
 .stTabs [data-baseweb="tab-list"] {{ gap: 6px; border-bottom: 1px solid {LINE}; }}
 .stTabs [data-baseweb="tab"] {{ font-weight: 700; padding: 10px 18px; border-radius: 10px 10px 0 0; }}
 .stTabs [aria-selected="true"] {{ background: {CARD}; color: {CORAL}; }}
@@ -108,7 +120,7 @@ def load_oof():
 def load_data():
     df = pd.read_csv(DATA_PATH)
     df["TotalCharges"] = pd.to_numeric(df["TotalCharges"], errors="coerce")
-    df = df[df["tenure"] > 0].drop(columns="customerID").reset_index(drop=True)
+    df = df[df["tenure"] > 0].reset_index(drop=True)
     df["SeniorCitizen"] = df["SeniorCitizen"].map({0: "No", 1: "Yes"})
     for c in YES_NO:
         df[c] = df[c].replace({"No phone service": "No", "No internet service": "No"}).map({"Yes": 1, "No": 0})
@@ -125,6 +137,7 @@ try:
     meta = load_meta()
     oof = load_oof()
     df = load_data()
+    df["Risk"] = model.predict_proba(df[FEATS])[:, 1]
 except FileNotFoundError as e:
     st.error(f"Missing file: {e.filename}. Run the notebook's final cell to create the files in `models/`.")
     st.stop()
@@ -303,94 +316,327 @@ with tab_predict:
 # DASHBOARD
 # ============================================================================
 with tab_dash:
-    f1, f2 = st.columns(2)
-    sel_c = f1.multiselect("Contract", sorted(df["Contract"].unique()), default=sorted(df["Contract"].unique()))
-    sel_i = f2.multiselect("Internet service", sorted(df["InternetService"].unique()),
-                           default=sorted(df["InternetService"].unique()))
-    dff = df[df["Contract"].isin(sel_c) & df["InternetService"].isin(sel_i)]
+    CONTRACTS = ["Month-to-month", "One year", "Two year"]
+    INTERNETS = ["Fiber optic", "DSL", "No"]
+    RATE_SCALE = [[0, "#F6D5C8"], [1, CORAL]]
+    _card_n = [0]
+
+    def card():
+        _card_n[0] += 1
+        return st.container(border=True, key=f"card-{_card_n[0]}")
+
+    def insight(text):
+        st.markdown(f'<div class="insight">{text}</div>', unsafe_allow_html=True)
+
+    def kpi_d(label, value, delta=None, bad_when_up=True, sub="", tone=""):
+        chip = ""
+        if delta is not None:
+            if abs(delta[0]) < 1e-9:
+                chip = f'<span class="chip flat">{delta[1]}</span>'
+            else:
+                bad = (delta[0] > 0) == bad_when_up
+                chip = f'<span class="chip {"bad" if bad else "good"}">{delta[1]}</span>'
+        return (f'<div class="kpi {tone}"><div class="kpi-l">{label}</div><div class="kpi-v">{value}</div>'
+                f'<div class="kpi-s">{chip} {sub}</div></div>')
+
+    # ---- Filters ------------------------------------------------------------
+    with card():
+        fa, fb = st.columns(2)
+        with fa:
+            sel_c = st.pills("Contract", CONTRACTS, selection_mode="multi", default=CONTRACTS, key="f_contract")
+        with fb:
+            sel_i = st.pills("Internet service", INTERNETS, selection_mode="multi", default=INTERNETS, key="f_net")
+        fc, fd = st.columns(2)
+        ten_lo, ten_hi = fc.slider("Tenure (months)", 1, 72, (1, 72), key="f_tenure")
+        chg_lo, chg_hi = fd.slider("Monthly charges ($)", 18, 119, (18, 119), key="f_charge")
+
+    dff = df[df["Contract"].isin(sel_c or []) & df["InternetService"].isin(sel_i or [])
+             & df["tenure"].between(ten_lo, ten_hi) & df["MonthlyCharges"].between(chg_lo, chg_hi)]
 
     if dff.empty:
-        st.warning("No customers match the selected filters.")
+        st.warning("No customers match these filters. Select at least one contract and one internet service, "
+                   "or widen the sliders.")
     else:
-        overall = dff["Churn"].mean()
+        co_rate = df["Churn"].mean()
+        co_charge = df["MonthlyCharges"].mean()
+        rate = dff["Churn"].mean()
+        active = dff[dff["Churn"] == 0]
+        flagged = active[active["Risk"] >= live_thr].sort_values("Risk", ascending=False)
         lost_rev = dff.loc[dff["Churn"] == 1, "MonthlyCharges"].sum()
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.markdown(kpi("Customers", f"{len(dff):,}", "billed subscribers"), unsafe_allow_html=True)
-        c2.markdown(kpi("Churn rate", f"{overall:.1%}", f"{int(dff['Churn'].sum()):,} churned", "coral"), unsafe_allow_html=True)
-        c3.markdown(kpi("Avg monthly charges", f"${dff['MonthlyCharges'].mean():,.2f}",
-                        f"churners ${dff.loc[dff.Churn == 1, 'MonthlyCharges'].mean():,.0f} · stayers "
-                        f"${dff.loc[dff.Churn == 0, 'MonthlyCharges'].mean():,.0f}", "gold"), unsafe_allow_html=True)
-        c4.markdown(kpi("Monthly revenue lost", f"${lost_rev:,.0f}", "sum of churners' monthly charges", "coral"),
-                    unsafe_allow_html=True)
-        c5.markdown(kpi("Avg tenure", f"{dff['tenure'].mean():.1f} mo", "months with the company", "teal"),
-                    unsafe_allow_html=True)
+
+        # ---- Headline insight -------------------------------------------------
+        seg = (dff.groupby(["Contract", "InternetService", "Tenure band"], observed=True)["Churn"]
+               .agg(["mean", "size", "sum"]).reset_index())
+        seg_big = seg[seg["size"] >= 40].sort_values("mean", ascending=False)
+        if not seg_big.empty:
+            s = seg_big.iloc[0]
+            share = s["sum"] / max(dff["Churn"].sum(), 1)
+            st.markdown(
+                f'<div class="banner"><span class="tag">Biggest risk in this view</span>'
+                f'<b>{s["Contract"]} · {s["InternetService"]} · {s["Tenure band"]}</b> customers churn at '
+                f'<b>{s["mean"]:.0%}</b> ({int(s["size"]):,} customers), accounting for '
+                f'<b>{share:.0%}</b> of all churners shown.</div>', unsafe_allow_html=True)
+
+        # ---- KPIs ---------------------------------------------------------------
+        sign = lambda v: "+" if v > 0 else ("" if v < 0 else "")
+        k1, k2, k3, k4, k5 = st.columns(5)
+        k1.markdown(kpi_d("Customers in view", f"{len(dff):,}", sub=f"of {len(df):,} total"), unsafe_allow_html=True)
+        dr = (rate - co_rate) * 100
+        k2.markdown(kpi_d("Churn rate", f"{rate:.1%}", (dr, f"{sign(dr)}{dr:.1f} pts vs company"), True,
+                          f"{int(dff['Churn'].sum()):,} churned", "coral"), unsafe_allow_html=True)
+        dc = dff["MonthlyCharges"].mean() - co_charge
+        k3.markdown(kpi_d("Avg monthly charges", f"${dff['MonthlyCharges'].mean():,.0f}",
+                          (dc, f"{sign(dc)}${abs(dc):,.0f} vs company"), False, "", "gold"), unsafe_allow_html=True)
+        k4.markdown(kpi_d("Monthly revenue lost", f"${lost_rev:,.0f}", None, True,
+                          f"{lost_rev / dff['MonthlyCharges'].sum():.0%} of billed revenue", "coral"), unsafe_allow_html=True)
+        k5.markdown(kpi_d("Active customers to target", f"{len(flagged):,}", None, True,
+                          f"${flagged['MonthlyCharges'].sum():,.0f}/mo at risk", "teal"), unsafe_allow_html=True)
         st.write("")
 
-        def churn_bar(col, title):
-            t = dff.groupby(col, observed=True)["Churn"].agg(["mean", "size"]).reset_index()
-            fig = go.Figure(go.Bar(x=t[col].astype(str), y=t["mean"] * 100, marker_color=CORAL,
-                                   text=[f"{v:.0%}" for v in t["mean"]], textposition="outside",
-                                   customdata=t["size"], hovertemplate="%{x}<br>%{y:.1f}% churn<br>n=%{customdata:,}<extra></extra>"))
-            fig.add_hline(y=overall * 100, line_dash="dash", line_color=INK, annotation_text="average",
-                          annotation_position="top left")
-            fig.update_yaxes(title="churn %", range=[0, max(t["mean"].max() * 100 * 1.2, 5)])
+        view = st.segmented_control(
+            "View", ["Overview", "Pricing", "Tenure & loyalty", "Services & payment", "Priority customers"],
+            default="Overview", key="dash_view", label_visibility="collapsed") or "Overview"
+
+        # ---- Chart helpers ------------------------------------------------------
+        def rate_bar(d, col, title, sort=False, height=330):
+            t = d.groupby(col, observed=True)["Churn"].agg(["mean", "size"]).reset_index()
+            if sort:
+                t = t.sort_values("mean", ascending=False)
+            avg = d["Churn"].mean()
+            fig = go.Figure(go.Bar(
+                x=t[col].astype(str).str.replace(" (automatic)", " (auto)", regex=False), y=t["mean"] * 100, customdata=t["size"],
+                marker=dict(color=t["mean"], colorscale=RATE_SCALE, cmin=0, cmax=max(0.6, t["mean"].max()),
+                            line=dict(width=0)),
+                text=[f"{v:.0%}" for v in t["mean"]], textposition="outside", cliponaxis=False,
+                hovertemplate="%{x}<br><b>%{y:.1f}% churn</b><br>%{customdata:,} customers<extra></extra>"))
+            fig.add_hline(y=avg * 100, line_dash="dash", line_color=INK, line_width=1,
+                          annotation_text=f"avg {avg:.0%}", annotation_position="top right")
+            fig.update_yaxes(title="churn %", range=[0, max(t["mean"].max() * 100 * 1.25, 8)])
             fig.update_layout(title=title)
-            return style(fig, 320, legend=False)
+            return style(fig, height, legend=False)
 
-        r1a, r1b = st.columns(2)
-        r1a.plotly_chart(churn_bar("Contract", "Churn rate by contract"), width="stretch")
-        r1b.plotly_chart(churn_bar("InternetService", "Churn rate by internet service"), width="stretch")
+        def heat(d, rows, cols, title, height=340):
+            p = d.pivot_table(index=rows, columns=cols, values="Churn", aggfunc="mean", observed=True) * 100
+            n = d.pivot_table(index=rows, columns=cols, values="Churn", aggfunc="size", observed=True)
+            fig = go.Figure(go.Heatmap(
+                z=p.values, x=[str(c) for c in p.columns], y=[str(r) for r in p.index], customdata=n.values,
+                colorscale=[[0, "#FBF7EE"], [0.5, "#F5B7A3"], [1, CORAL]], zmin=0,
+                text=[[f"{v:.0f}%" if pd.notna(v) else "" for v in r] for r in p.values], texttemplate="%{text}",
+                hovertemplate="%{y} · %{x}<br><b>%{z:.1f}% churn</b><br>%{customdata:,} customers<extra></extra>",
+                colorbar=dict(title="churn %", thickness=12)))
+            fig.update_yaxes(autorange="reversed")
+            fig.update_layout(title=title)
+            return style(fig, height, legend=False)
 
-        st.markdown("#### Monthly charges")
-        m1, m2 = st.columns(2)
-        fig = px.histogram(dff, x="MonthlyCharges", color="Status", nbins=40, barmode="overlay", opacity=0.7,
-                           marginal="box", color_discrete_map=STATUS_COLORS,
-                           title="Monthly charges: churners vs. stayers")
-        fig.update_xaxes(title="monthly charges ($)")
-        m1.plotly_chart(style(fig, 360), width="stretch")
-        m2.plotly_chart(churn_bar("Charge band", "Churn rate by monthly-charge band"), width="stretch")
+        # =========================== OVERVIEW =====================================
+        if view == "Overview":
+            o1, o2 = st.columns([1, 2])
+            with o1, card():
+                n_ch = int(dff["Churn"].sum())
+                fig = go.Figure(go.Pie(labels=["Stay", "Churn"], values=[len(dff) - n_ch, n_ch], hole=0.64,
+                                       marker=dict(colors=[TEAL, CORAL], line=dict(color=CARD, width=3)),
+                                       textinfo="percent", sort=False,
+                                       hovertemplate="%{label}: %{value:,} customers<extra></extra>"))
+                fig.add_annotation(text=f"<b>{rate:.0%}</b><br>churn", showarrow=False,
+                                   font=dict(family="Fraunces, serif", size=26, color=INK))
+                fig.update_layout(title="Who leaves")
+                st.plotly_chart(style(fig, 360), width="stretch")
+                insight(f"<b>{n_ch:,}</b> of {len(dff):,} customers in this view have churned.")
 
-        m3, m4 = st.columns(2)
-        sample = dff.sample(min(len(dff), 1800), random_state=42)
-        fig = px.scatter(sample, x="tenure", y="MonthlyCharges", color="Status", opacity=0.55,
-                         color_discrete_map=STATUS_COLORS, title="Monthly charges vs. tenure")
-        fig.update_xaxes(title="tenure (months)"); fig.update_yaxes(title="monthly charges ($)")
-        m3.plotly_chart(style(fig, 360), width="stretch")
-        avg = dff.groupby(["Contract", "Status"], observed=True)["MonthlyCharges"].mean().reset_index()
-        fig = px.bar(avg, x="Contract", y="MonthlyCharges", color="Status", barmode="group",
-                     color_discrete_map=STATUS_COLORS, text_auto=".0f", title="Average monthly charges by contract")
-        fig.update_yaxes(title="avg monthly charges ($)")
-        m4.plotly_chart(style(fig, 360), width="stretch")
+            # ranked league table of drivers
+            net = dff[dff["InternetService"] != "No"]
+            yn = {1: "Yes", 0: "No"}
+            specs = [("Contract", dff, "Contract", None), ("Internet", dff, "InternetService", None),
+                     ("Payment", dff, "PaymentMethod", None), ("Tenure", dff, "Tenure band", None),
+                     ("Monthly charges", dff, "Charge band", None), ("Paperless billing", dff, "PaperlessBilling", yn),
+                     ("Senior citizen", dff, "SeniorCitizen", None), ("Partner", dff, "Partner", yn),
+                     ("Tech support*", net, "TechSupport", yn), ("Online security*", net, "OnlineSecurity", yn)]
+            out = []
+            for name, src, col, mp in specs:
+                g = src.groupby(col, observed=True)["Churn"].agg(["mean", "size"]).reset_index()
+                for _, r in g.iterrows():
+                    if r["size"] >= 50:
+                        out.append((f"{name}: {mp[r[col]] if mp else r[col]}", r["mean"], int(r["size"])))
+            drv = pd.DataFrame(out, columns=["label", "rate", "n"]).sort_values("rate")
+            drv = pd.concat([drv.head(4), drv.tail(8)]).drop_duplicates("label")
+            with o2, card():
+                fig = go.Figure(go.Bar(
+                    x=drv["rate"] * 100, y=drv["label"], orientation="h", customdata=drv["n"],
+                    marker_color=[CORAL if v > rate else TEAL for v in drv["rate"]],
+                    text=[f"{v:.0%}" for v in drv["rate"]], textposition="outside", cliponaxis=False,
+                    hovertemplate="%{y}<br><b>%{x:.1f}% churn</b><br>%{customdata:,} customers<extra></extra>"))
+                fig.add_vline(x=rate * 100, line_dash="dash", line_color=INK, line_width=1)
+                fig.update_xaxes(title="churn %", range=[0, drv["rate"].max() * 100 * 1.18])
+                fig.update_layout(title="What separates churners from stayers (highest and lowest-risk groups)")
+                st.plotly_chart(style(fig, 360, legend=False), width="stretch")
+                insight("Coral = churns more than this view's average (dashed line), teal = less. "
+                        "*Internet customers only.")
 
-        st.markdown("#### Tenure, payment and services")
-        t1, t2 = st.columns(2)
-        fig = px.histogram(dff, x="tenure", color="Status", nbins=36, barmode="overlay", opacity=0.7,
-                           color_discrete_map=STATUS_COLORS, title="Tenure distribution")
-        fig.update_xaxes(title="tenure (months)")
-        t1.plotly_chart(style(fig, 340), width="stretch")
-        t2.plotly_chart(churn_bar("Tenure band", "Churn rate by tenure band"), width="stretch")
+            t1, t2 = st.columns([1, 1.3])
+            with t1, card():
+                gc = (dff.groupby("Contract", observed=True)["Churn"].agg(rate="mean", n="size").reset_index())
+                gi = (dff.groupby(["Contract", "InternetService"], observed=True)["Churn"]
+                      .agg(rate="mean", n="size").reset_index())
+                ids, labels, parents, values, rates = ["all"], ["All customers"], [""], [len(dff)], [rate]
+                for _, r in gc.iterrows():
+                    ids.append(r["Contract"]); labels.append(r["Contract"]); parents.append("all")
+                    values.append(int(r["n"])); rates.append(r["rate"])
+                for _, r in gi.iterrows():
+                    ids.append(f'{r["Contract"]}|{r["InternetService"]}'); labels.append(r["InternetService"])
+                    parents.append(r["Contract"]); values.append(int(r["n"])); rates.append(r["rate"])
+                fig = go.Figure(go.Treemap(
+                    ids=ids, labels=labels, parents=parents, values=values, branchvalues="total", customdata=rates,
+                    marker=dict(colors=rates, colorscale=RATE_SCALE, cmin=0, cmax=0.7, line=dict(width=2, color=CARD)),
+                    texttemplate="<b>%{label}</b><br>%{customdata:.0%} churn",
+                    hovertemplate="%{label}<br>%{value:,} customers<br>%{customdata:.1%} churn<extra></extra>"))
+                fig.update_layout(title="Customer groups: size = customers, colour = churn rate")
+                st.plotly_chart(style(fig, 380, legend=False), width="stretch")
+            with t2, card():
+                st.markdown('<div class="sec-title">Riskiest segments</div>', unsafe_allow_html=True)
+                tbl = seg_big.head(8).copy()
+                tbl["Segment"] = tbl["Contract"] + " · " + tbl["InternetService"] + " · " + tbl["Tenure band"].astype(str)
+                tbl["Churn rate"] = tbl["mean"] * 100
+                st.dataframe(tbl[["Segment", "Churn rate", "size"]].rename(columns={"size": "Customers"}),
+                             hide_index=True, width="stretch", height=330,
+                             column_config={"Segment": st.column_config.TextColumn("Segment", width=250),
+                                            "Churn rate": st.column_config.ProgressColumn(
+                                                "Churn rate", format="%.0f%%", min_value=0, max_value=100, width=100),
+                                            "Customers": st.column_config.NumberColumn(format="%d", width=85)})
 
-        h1, h2 = st.columns(2)
-        piv = dff.pivot_table(index="Contract", columns="InternetService", values="Churn", aggfunc="mean") * 100
-        fig = go.Figure(go.Heatmap(z=piv.values, x=piv.columns, y=piv.index,
-                                   colorscale=[[0, "#FBF7EE"], [0.5, "#F5B7A3"], [1, CORAL]],
-                                   text=[[f"{v:.0f}%" if pd.notna(v) else "" for v in r] for r in piv.values],
-                                   texttemplate="%{text}", colorbar=dict(title="churn %")))
-        fig.update_layout(title="Churn rate: contract x internet service")
-        h1.plotly_chart(style(fig, 340, legend=False), width="stretch")
-        h2.plotly_chart(churn_bar("PaymentMethod", "Churn rate by payment method"), width="stretch")
+        # =========================== PRICING ======================================
+        elif view == "Pricing":
+            p1, p2 = st.columns(2)
+            with p1, card():
+                fig = px.histogram(dff, x="MonthlyCharges", color="Status", nbins=40, barmode="overlay",
+                                   opacity=0.72, marginal="box", color_discrete_map=STATUS_COLORS,
+                                   title="Monthly charges by outcome")
+                fig.update_xaxes(title="monthly charges ($)")
+                st.plotly_chart(style(fig, 380), width="stretch")
+                mc = dff.groupby("Status")["MonthlyCharges"].mean()
+                if {"Churn", "Stay"} <= set(mc.index):
+                    insight(f"Churners pay <b>${mc['Churn']:,.0f}</b> a month on average vs. "
+                            f"<b>${mc['Stay']:,.0f}</b> for stayers.")
+            with p2, card():
+                st.plotly_chart(rate_bar(dff, "Charge band", "Churn rate by monthly-charge band", height=380),
+                                width="stretch")
+                insight("Churn climbs with the bill, but a high bill alone does not explain it: see the heatmap below.")
+            p3, p4 = st.columns(2)
+            with p3, card():
+                st.plotly_chart(heat(dff, "Charge band", "Tenure band", "Churn: monthly charges x tenure"),
+                                width="stretch")
+                insight("New customers on expensive plans are the most price-sensitive group.")
+            with p4, card():
+                sample = dff.sample(min(len(dff), 1800), random_state=42)
+                fig = px.scatter(sample, x="tenure", y="MonthlyCharges", color="Status", opacity=0.55,
+                                 color_discrete_map=STATUS_COLORS, title="Monthly charges vs. tenure")
+                fig.update_xaxes(title="tenure (months)"); fig.update_yaxes(title="monthly charges ($)")
+                st.plotly_chart(style(fig, 340), width="stretch")
 
-        net = dff[dff["InternetService"] != "No"].copy()
-        if not net.empty:
-            net["Protection add-ons"] = net[PROTECTION].sum(axis=1)
-            t = net.groupby("Protection add-ons")["Churn"].agg(["mean", "size"]).reset_index()
-            fig = go.Figure(go.Bar(x=t["Protection add-ons"].astype(str), y=t["mean"] * 100, marker_color=TEAL,
-                                   text=[f"{v:.0%}" for v in t["mean"]], textposition="outside",
-                                   customdata=t["size"], hovertemplate="%{x} add-ons<br>%{y:.1f}% churn<br>n=%{customdata:,}<extra></extra>"))
-            fig.update_yaxes(title="churn %", range=[0, t["mean"].max() * 100 * 1.2])
-            fig.update_xaxes(title="number of protection add-ons (security, backup, device, tech support)")
-            fig.update_layout(title="Churn rate by protection add-ons (internet customers)")
-            st.plotly_chart(style(fig, 320, legend=False), width="stretch")
+        # =========================== TENURE =======================================
+        elif view == "Tenure & loyalty":
+            a1, a2 = st.columns(2)
+            with a1, card():
+                tt = dff.assign(bucket=((dff["tenure"] - 1) // 6) * 6 + 1)
+                g = tt.groupby("bucket")["Churn"].agg(["mean", "size"]).reset_index()
+                g["label"] = g["bucket"].astype(int).astype(str) + "-" + (g["bucket"] + 5).astype(int).astype(str)
+                fig = go.Figure(go.Scatter(x=g["label"], y=g["mean"] * 100, mode="lines+markers",
+                                           line=dict(color=CORAL, width=3), marker=dict(size=9),
+                                           fill="tozeroy", fillcolor="rgba(228,87,46,.12)", customdata=g["size"],
+                                           hovertemplate="months %{x}<br><b>%{y:.1f}% churn</b><br>%{customdata:,} customers<extra></extra>"))
+                fig.update_xaxes(title="tenure (months, 6-month buckets)"); fig.update_yaxes(title="churn %")
+                fig.update_layout(title="Risk fades as customers stay longer")
+                st.plotly_chart(style(fig, 360, legend=False), width="stretch")
+                first = dff.loc[dff["tenure"] <= 12, "Churn"]
+                later = dff.loc[dff["tenure"] > 12, "Churn"]
+                if len(first) and len(later):
+                    insight(f"First-year customers churn at <b>{first.mean():.0%}</b> vs. <b>{later.mean():.0%}</b> after year one.")
+            with a2, card():
+                fig = px.histogram(dff, x="tenure", color="Status", nbins=36, barmode="overlay", opacity=0.72,
+                                   color_discrete_map=STATUS_COLORS, title="Tenure distribution")
+                fig.update_xaxes(title="tenure (months)")
+                st.plotly_chart(style(fig, 360), width="stretch")
+            a3, a4 = st.columns(2)
+            with a3, card():
+                st.plotly_chart(heat(dff, "Contract", "Tenure band", "Churn: contract x tenure"), width="stretch")
+            with a4, card():
+                st.plotly_chart(rate_bar(dff, "Tenure band", "Churn rate by tenure band", height=340), width="stretch")
+
+        # =========================== SERVICES =====================================
+        elif view == "Services & payment":
+            net = dff[dff["InternetService"] != "No"]
+            s1, s2 = st.columns(2)
+            with s1, card():
+                rows = []
+                for label, col in [("Tech support", "TechSupport"), ("Online security", "OnlineSecurity"),
+                                   ("Online backup", "OnlineBackup"), ("Device protection", "DeviceProtection")]:
+                    for val, name in [(1, "With"), (0, "Without")]:
+                        sub = net[net[col] == val]
+                        if len(sub) >= 30:
+                            rows.append((label, name, sub["Churn"].mean() * 100))
+                if rows:
+                    g = pd.DataFrame(rows, columns=["Service", "Has service", "churn"])
+                    fig = px.bar(g, x="Service", y="churn", color="Has service", barmode="group", text_auto=".0f",
+                                 color_discrete_map={"With": TEAL, "Without": CORAL},
+                                 title="Churn with vs. without each add-on")
+                    fig.update_yaxes(title="churn %")
+                    st.plotly_chart(style(fig, 380), width="stretch")
+                    insight("Customers without tech support or online security churn far more. "
+                            "This is an association; engaged customers may simply buy more add-ons.")
+                else:
+                    st.info("Not enough internet customers in this view.")
+            with s2, card():
+                st.plotly_chart(rate_bar(dff, "PaymentMethod", "Churn rate by payment method", sort=True, height=380),
+                                width="stretch")
+                insight("Electronic-check payers stand out. Automatic payment is a low-cost lever.")
+            s3, s4 = st.columns(2)
+            with s3, card():
+                if not net.empty:
+                    n2 = net.copy()
+                    n2["Protection add-ons"] = n2[PROTECTION].sum(axis=1)
+                    st.plotly_chart(rate_bar(n2, "Protection add-ons", "Churn by number of protection add-ons", height=340),
+                                    width="stretch")
+            with s4, card():
+                d2 = dff.assign(Paperless=dff["PaperlessBilling"].map({1: "Paperless", 0: "Paper bill"}))
+                st.plotly_chart(rate_bar(d2, "Paperless", "Churn by billing type", height=340), width="stretch")
+
+        # =========================== PRIORITY =====================================
+        else:
+            with card():
+                st.markdown('<div class="sec-title">Retention call list</div>', unsafe_allow_html=True)
+                st.caption(f"Current customers (not churned) whose model risk is at or above the "
+                           f"{live_thr:.0%} cost-based threshold, highest risk first. Change the retention economics "
+                           f"in the sidebar to move the threshold.")
+                if flagged.empty:
+                    st.info("No active customers in this view are above the threshold.")
+                else:
+                    def levers(r):
+                        out = []
+                        if r["Contract"] == "Month-to-month":
+                            out.append("1-2 yr contract offer")
+                        if r["InternetService"] != "No" and r["TechSupport"] == 0:
+                            out.append("Free support/security bundle")
+                        if r["PaymentMethod"] == "Electronic check":
+                            out.append("Switch to auto-pay")
+                        return " + ".join(out[:2]) if out else "Check-in call"
+
+                    show_n = st.slider("Customers to show", 10, int(min(500, len(flagged))) if len(flagged) > 10 else 10,
+                                       min(50, len(flagged)), key="top_n") if len(flagged) > 10 else len(flagged)
+                    lst = flagged.head(show_n).copy()
+                    lst["Suggested lever"] = lst.apply(levers, axis=1)
+                    lst["Risk %"] = lst["Risk"] * 100
+                    out_df = lst[["customerID", "Risk %", "Contract", "InternetService", "tenure", "MonthlyCharges",
+                                  "Suggested lever"]].rename(columns={"InternetService": "Internet", "tenure": "Tenure (mo)",
+                                                                       "MonthlyCharges": "Monthly $"})
+                    st.dataframe(out_df, hide_index=True, width="stretch", height=420,
+                                 column_config={"Risk %": st.column_config.ProgressColumn(
+                                     "Churn risk", format="%.0f%%", min_value=0, max_value=100),
+                                     "Monthly $": st.column_config.NumberColumn(format="$%.2f")})
+                    st.download_button("Download this list (CSV)", out_df.to_csv(index=False).encode(),
+                                       file_name="retention_call_list.csv", mime="text/csv")
+                    st.caption("Risk is the model's probability. Customers in this dataset include rows used to train "
+                               "the model, so treat it as a ranking for action, not as validated accuracy. "
+                               "Suggested levers are rule-based from the churn analysis, not model outputs.")
+
 
 # ============================================================================
 # MODEL & COST
