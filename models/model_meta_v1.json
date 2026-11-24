@@ -1,0 +1,171 @@
+{
+  "model_name": "Gradient Boosting",
+  "sklearn_version": "1.8.0",
+  "threshold": 0.33,
+  "costs": {
+    "offer": 50,
+    "loss": 400,
+    "save_rate": 0.4
+  },
+  "n_train": 5625,
+  "n_test": 1407,
+  "churn_rate": 0.26578498293515357,
+  "test": {
+    "roc_auc": 0.841356880691201,
+    "pr_auc": 0.6581243088335361,
+    "brier": 0.13729858704140674,
+    "saving_vs_no_action": 0.1264705882352941,
+    "recall": 0.7406417112299465,
+    "precision": 0.5452755905511811,
+    "confusion": {
+      "tn": 802,
+      "fp": 231,
+      "fn": 97,
+      "tp": 277
+    },
+    "ci": {
+      "roc_auc": [
+        0.8196367567354496,
+        0.8623061715271403
+      ],
+      "pr_auc": [
+        0.6077904279545979,
+        0.7071533004764105
+      ],
+      "saving": [
+        0.10830890169149597,
+        0.14270347388357257
+      ]
+    }
+  },
+  "cv_comparison": [
+    {
+      "model": "Gradient Boosting",
+      "auc": 0.8478,
+      "pr_auc": 0.6641
+    },
+    {
+      "model": "Random Forest",
+      "auc": 0.8463,
+      "pr_auc": 0.6639
+    },
+    {
+      "model": "Logistic Regression",
+      "auc": 0.846,
+      "pr_auc": 0.6598
+    },
+    {
+      "model": "Extra Trees",
+      "auc": 0.8439,
+      "pr_auc": 0.6522
+    },
+    {
+      "model": "Hist Gradient Boosting",
+      "auc": 0.8392,
+      "pr_auc": 0.6498
+    },
+    {
+      "model": "SVM (RBF)",
+      "auc": 0.8049,
+      "pr_auc": 0.6388
+    },
+    {
+      "model": "Decision Tree",
+      "auc": 0.8298,
+      "pr_auc": 0.6108
+    },
+    {
+      "model": "KNN",
+      "auc": 0.8211,
+      "pr_auc": 0.6019
+    }
+  ],
+  "importance": [
+    {
+      "feature": "tenure",
+      "drop_in_pr_auc": 0.09,
+      "sd": 0.0181
+    },
+    {
+      "feature": "InternetService",
+      "drop_in_pr_auc": 0.0864,
+      "sd": 0.0134
+    },
+    {
+      "feature": "Contract",
+      "drop_in_pr_auc": 0.0559,
+      "sd": 0.0121
+    },
+    {
+      "feature": "TotalCharges",
+      "drop_in_pr_auc": 0.0546,
+      "sd": 0.0131
+    },
+    {
+      "feature": "PaperlessBilling",
+      "drop_in_pr_auc": 0.0111,
+      "sd": 0.0036
+    },
+    {
+      "feature": "TechSupport",
+      "drop_in_pr_auc": 0.0061,
+      "sd": 0.0027
+    },
+    {
+      "feature": "PhoneService",
+      "drop_in_pr_auc": 0.0045,
+      "sd": 0.0025
+    },
+    {
+      "feature": "PaymentMethod",
+      "drop_in_pr_auc": 0.0037,
+      "sd": 0.0048
+    },
+    {
+      "feature": "MultipleLines",
+      "drop_in_pr_auc": 0.0036,
+      "sd": 0.0052
+    },
+    {
+      "feature": "OnlineSecurity",
+      "drop_in_pr_auc": 0.0029,
+      "sd": 0.0049
+    },
+    {
+      "feature": "SeniorCitizen",
+      "drop_in_pr_auc": 0.0026,
+      "sd": 0.0016
+    },
+    {
+      "feature": "MonthlyCharges",
+      "drop_in_pr_auc": 0.0021,
+      "sd": 0.0044
+    }
+  ],
+  "calibration": {
+    "pred": [
+      0.01260109688352786,
+      0.022542781210245638,
+      0.04413689964952381,
+      0.08674520951022473,
+      0.15336857603528664,
+      0.24547570573394745,
+      0.3439242644534098,
+      0.4608520873551633,
+      0.5910992154958539,
+      0.7648176025102172
+    ],
+    "obs": [
+      0.014184397163120567,
+      0.0,
+      0.05714285714285714,
+      0.10638297872340426,
+      0.19858156028368795,
+      0.24285714285714285,
+      0.2624113475177305,
+      0.4785714285714286,
+      0.5460992907801419,
+      0.75177304964539
+    ]
+  }
+}

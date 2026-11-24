@@ -1,0 +1,10 @@
+{
+  "name": "Churn Radar",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12",
+  "customizations": {
+    "vscode": { "extensions": ["ms-python.python", "ms-toolsai.jupyter"] }
+  },
+  "updateContentCommand": "pip install -r requirements-notebook.txt",
+  "postAttachCommand": "streamlit run App.py --server.enableCORS false --server.enableXsrfProtection false",
+  "forwardPorts": [8501]
+}
