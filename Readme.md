@@ -109,3 +109,12 @@ To re-run the analysis: `pip install -r requirements-notebook.txt`, open the not
 - Estimate offer success rate and churn loss from real campaign / CLV data.
 - Uplift modelling to target customers who respond to an offer, not just those likely to churn.
 - Out-of-time validation and drift monitoring if deployed.
+
+## Dashbord snapshots 
+<img width="733" height="416" alt="image" src="https://github.com/user-attachments/assets/7f19bcba-e865-4feb-9024-3f130e8f73a8" />
+<img width="1920" height="836" alt="image" src="https://github.com/user-attachments/assets/13b975c6-b48e-427e-b2e1-620fee4d6763" />
+<img width="1920" height="836" alt="image" src="https://github.com/user-attachments/assets/d55960de-aaf5-43d9-ab65-e054eb15cbad" />
+<img width="3840" height="1671" alt="image" src="https://github.com/user-attachments/assets/ec6687ba-0ee0-499d-aebb-775a53c484f9" />
+
+
+
